@@ -44,8 +44,7 @@ func main() {
     // Create a new user node
     query, params, err := gocypher.NewQueryBuilder().
         Create(
-            gocypher.N("u", "User")
-            .WithProperties(map[string]interface{}{
+            gocypher.N("u", "User").WithProperties(map[string]interface{}{
                 "name": "Alice",
                 "age":  30,
             }),
