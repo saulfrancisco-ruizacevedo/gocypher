@@ -70,4 +70,21 @@ func main() {
 		DetachDelete("p").
 		Build()
 	gocypher.PrintQuery("Example 6: Find and safely delete a node", q6, p6, e6)
+
+	// Example 7: Create a relationship between nodes with conflicting property keys ("name")
+	q7, p7, e7 := gocypher.NewQueryBuilder().
+		Match(
+			gocypher.N("t", "Team").WithProperties(map[string]interface{}{"name": "Platform Team"}),
+		).
+		Match(
+			gocypher.N("c", "Component").WithProperties(map[string]interface{}{"name": "auth-service"}),
+		).
+		Create(
+			gocypher.NRef("t"),
+			gocypher.R("", "MANAGES").To(),
+			gocypher.NRef("c"),
+		).
+		Return("t.name", "c.name").
+		Build()
+	gocypher.PrintQuery("Example 7: Create relationship with conflicting property names", q7, p7, e7)
 }

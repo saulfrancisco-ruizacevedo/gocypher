@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"sync/atomic"
 )
 
 // --- CORE TYPES AND INTERFACES ---
@@ -21,7 +20,8 @@ const (
 
 // PatternPart is an interface representing any component of a Cypher pattern (i.e., a node or a relationship).
 type PatternPart interface {
-	render() string
+	// render() string
+	render(qb *QueryBuilder) string
 }
 
 // --- PATTERN STRUCTURES ---
@@ -35,7 +35,7 @@ type NodePattern struct {
 
 // render converts the NodePattern to its Cypher string representation.
 // It correctly handles cases where the label is empty (for referencing existing aliases).
-func (n *NodePattern) render() string {
+func (n *NodePattern) render(qb *QueryBuilder) string {
 	labelStr := ""
 	if n.Label != "" {
 		labelStr = ":" + n.Label
@@ -44,8 +44,12 @@ func (n *NodePattern) render() string {
 	propStr := ""
 	if len(n.Properties) > 0 {
 		var props []string
-		for key := range n.Properties {
-			props = append(props, fmt.Sprintf("%s: $%s", key, key))
+		for key, val := range n.Properties {
+			paramNum := qb.paramCounter
+			qb.paramCounter++
+			paramName := fmt.Sprintf("p%s_%d", paramSanitizer.ReplaceAllString(key, ""), paramNum)
+			qb.queryParams[paramName] = val
+			props = append(props, fmt.Sprintf("%s: $%s", key, paramName))
 		}
 		propStr = fmt.Sprintf(" {%s}", strings.Join(props, ", "))
 	}
@@ -62,7 +66,7 @@ type RelPattern struct {
 }
 
 // render converts the RelPattern to its Cypher string representation, including properties.
-func (r *RelPattern) render() string {
+func (r *RelPattern) render(qb *QueryBuilder) string {
 	relTypeStr := ""
 	if r.Type != "" {
 		relTypeStr = ":" + r.Type
@@ -71,8 +75,12 @@ func (r *RelPattern) render() string {
 	propStr := ""
 	if len(r.Properties) > 0 {
 		var props []string
-		for key := range r.Properties {
-			props = append(props, fmt.Sprintf("%s: $%s", key, key))
+		for key, val := range r.Properties {
+			paramNum := qb.paramCounter
+			qb.paramCounter++
+			paramName := fmt.Sprintf("p%s_%d", paramSanitizer.ReplaceAllString(key, ""), paramNum)
+			qb.queryParams[paramName] = val
+			props = append(props, fmt.Sprintf("%s: $%s", key, paramName))
 		}
 		propStr = fmt.Sprintf(" {%s}", strings.Join(props, ", "))
 	}
@@ -145,12 +153,14 @@ type QueryBuilder struct {
 	returnAliases []string
 	queryParams   map[string]interface{}
 	err           error
+	paramCounter  uint64
 }
 
 // NewQueryBuilder creates a new instance of the QueryBuilder.
 func NewQueryBuilder() *QueryBuilder {
 	return &QueryBuilder{
-		queryParams: make(map[string]interface{}),
+		queryParams:  make(map[string]interface{}),
+		paramCounter: 0,
 	}
 }
 
@@ -158,27 +168,7 @@ func NewQueryBuilder() *QueryBuilder {
 func (qb *QueryBuilder) renderPattern(parts ...PatternPart) string {
 	var pattern strings.Builder
 	for _, part := range parts {
-		// Extract properties from nodes
-		if node, ok := part.(*NodePattern); ok {
-			for key, val := range node.Properties {
-				if _, exists := qb.queryParams[key]; exists {
-					qb.err = fmt.Errorf("parameter '%s' already exists", key)
-					return ""
-				}
-				qb.queryParams[key] = val
-			}
-		}
-		// Extract properties from relationships
-		if rel, ok := part.(*RelPattern); ok {
-			for key, val := range rel.Properties {
-				if _, exists := qb.queryParams[key]; exists {
-					qb.err = fmt.Errorf("parameter '%s' already exists", key)
-					return ""
-				}
-				qb.queryParams[key] = val
-			}
-		}
-		pattern.WriteString(part.render())
+		pattern.WriteString(part.render(qb))
 	}
 	return pattern.String()
 }
@@ -241,7 +231,8 @@ func (qb *QueryBuilder) Set(updates map[string]interface{}) *QueryBuilder {
 		return qb
 	}
 	for prop, val := range updates {
-		paramNum := atomic.AddUint64(&setParamCounter, 1)
+		paramNum := qb.paramCounter
+		qb.paramCounter++
 		paramName := fmt.Sprintf("set%s_%d", paramSanitizer.ReplaceAllString(prop, "_"), paramNum)
 		qb.setClauses = append(qb.setClauses, fmt.Sprintf("%s = $%s", prop, paramName))
 		qb.queryParams[paramName] = val
